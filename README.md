@@ -1,6 +1,6 @@
-﻿# CampusConnect
+# EventHive
 
-CampusConnect is a React frontend for discovering and managing university events.
+EventHive is a React frontend for discovering and managing university events.
 
 ## Run locally
 
