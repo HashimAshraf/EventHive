@@ -1,8 +1,10 @@
-﻿import { Link, useParams } from "react-router-dom";
+﻿import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { useApp } from "../context/useApp";
 
 export default function Organizer() {
   const app = useApp();
+  const [error, setError] = useState(null);
   const events = app.events.filter((event) => event.organizerId === app.user.id).sort((a, b) => a.date.localeCompare(b.date));
   return (
     <div className="stack">
@@ -12,6 +14,7 @@ export default function Organizer() {
         </div>
       </header>
       <h2>Your events</h2>
+      {error && <p className="error" role="alert">{error}</p>}
       {!events.length && <p className="panel muted">Create your first event to start accepting registrations.</p>}
       {events.map((event) => (
         <article className="panel split" key={event.id}>
@@ -23,7 +26,7 @@ export default function Organizer() {
             <Link className="btn btn-ghost btn-sm" to={`/organizer/${event.id}/attendees`}>Attendees</Link>
             <Link className="btn btn-ghost btn-sm" to={`/organizer/${event.id}/edit`}>Edit</Link>
             <button className="btn btn-danger btn-sm" onClick={() => {
-              if (window.confirm(`Delete "${event.title}" and its registrations?`)) app.deleteEvent(event.id);
+              if (window.confirm(`Delete "${event.title}" and its registrations?`)) setError(app.deleteEvent(event.id));
             }}>Delete</button>
           </div>
         </article>
@@ -46,7 +49,7 @@ function exportAttendees(eventId, attendees) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `campusconnect-${eventId}-attendees.csv`;
+  link.download = `eventhive-${eventId}-attendees.csv`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -54,6 +57,7 @@ function exportAttendees(eventId, attendees) {
 export function Attendees() {
   const { id } = useParams();
   const app = useApp();
+  const [error, setError] = useState(null);
   const event = app.events.find((item) => item.id === id && item.organizerId === app.user.id);
   if (!event) return <div className="panel"><h1>Event unavailable</h1><Link to="/organizer">Back to dashboard</Link></div>;
 
@@ -70,6 +74,7 @@ export function Attendees() {
       </header>
       <section className="stack">
         <h2>Attendees</h2>
+        {error && <p className="error" role="alert">{error}</p>}
         {attendees.length ? (
           <div className="table-wrap"><table>
             <thead><tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Attendance</th></tr></thead>
@@ -77,7 +82,7 @@ export function Attendees() {
               <tr key={item.id}>
                 <td>{item.person.name}</td><td>{item.person.email}</td>
                 <td><label className="check"><input type="checkbox" checked={item.attended} disabled={event.date > app.today}
-                  aria-label={`Mark ${item.person.name} as attended`} onChange={(e) => app.markAttendance(item.id, e.target.checked)} /> Attended</label></td>
+                  aria-label={`Mark ${item.person.name} as attended`} onChange={(e) => setError(app.markAttendance(item.id, e.target.checked))} /> Attended</label></td>
               </tr>
             ))}</tbody>
           </table></div>

@@ -1,4 +1,4 @@
-﻿import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useApp } from "../context/useApp";
 
 export default function Navbar() {
@@ -7,7 +7,7 @@ export default function Navbar() {
   return (
     <header className="nav">
       <div className="container">
-        <NavLink to="/" className="brand">CampusConnect</NavLink>
+        <NavLink to="/" className="brand">EventHive</NavLink>
         <NavLink to="/events">Events</NavLink>
         {user?.role === "student" && <NavLink to="/my-events">My events</NavLink>}
         {user?.role === "organizer" && <NavLink to="/organizer">My club</NavLink>}
