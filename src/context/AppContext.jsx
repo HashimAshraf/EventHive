@@ -1,6 +1,5 @@
 ﻿import { useState } from "react";
 import { seed } from "../data/mockData";
-
 import { AppContext } from "./useApp";
 
 function load() {
@@ -16,7 +15,7 @@ function load() {
       return saved;
     }
   } catch {
-    // Start with the demo data if the browser cannot read the saved copy.
+    // Start with demo data if saved data cannot be read.
   }
 
   return seed;
@@ -196,13 +195,26 @@ export function AppProvider({ children }) {
     );
   }
 
+  // Organizer attendance management
   function markAttendance(regId, attended) {
     const registration = db.registrations.find((item) => item.id === regId);
 
-    const event = findEvent(registration?.eventId);
+    if (!registration) {
+      return "Registration not found.";
+    }
 
-    if (!owns(event) || event.date > today) {
-      return "Attendance is unavailable.";
+    const event = findEvent(registration.eventId);
+
+    if (!event || !owns(event)) {
+      return "You do not have access to this attendance record.";
+    }
+
+    if (event.date > today) {
+      return "Attendance can only be marked on or after the event date.";
+    }
+
+    if (typeof attended !== "boolean") {
+      return "Invalid attendance status.";
     }
 
     return update(
@@ -213,6 +225,7 @@ export function AppProvider({ children }) {
     );
   }
 
+  // Student feedback
   function addFeedback(eventId, rating, comment) {
     const event = findEvent(eventId);
 
@@ -245,6 +258,7 @@ export function AppProvider({ children }) {
     ]);
   }
 
+  // Organizer event creation
   function createEvent(data) {
     if (user?.role !== "organizer") {
       return "Only organizers can publish events.";
@@ -261,6 +275,7 @@ export function AppProvider({ children }) {
     ]);
   }
 
+  // Organizer event editing
   function updateEvent(id, data) {
     if (!owns(findEvent(id))) {
       return "You can only edit your club’s events.";
@@ -278,6 +293,7 @@ export function AppProvider({ children }) {
     );
   }
 
+  // Event deletion
   function deleteEvent(id) {
     if (user?.role !== "admin" && !owns(findEvent(id))) {
       return "You do not have access to remove this event.";
@@ -291,6 +307,7 @@ export function AppProvider({ children }) {
     });
   }
 
+  // Admin organizer approval
   function approveOrganizer(id) {
     if (user?.role !== "admin") {
       return "Only admins can approve organizers.";
@@ -306,6 +323,7 @@ export function AppProvider({ children }) {
     );
   }
 
+  // Admin user removal
   function removeUser(id) {
     if (
       user?.role !== "admin" ||
