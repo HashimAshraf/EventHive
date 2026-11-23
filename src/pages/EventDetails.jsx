@@ -1,17 +1,32 @@
-﻿import { useState } from "react";
+﻿
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useApp } from "../context/useApp";
 
 function FeedbackForm({ eventId, existing }) {
   const { addFeedback } = useApp();
+
   const [rating, setRating] = useState(existing?.rating ?? 5);
   const [comment, setComment] = useState(existing?.comment ?? "");
   const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
-    const result = addFeedback(eventId, Number(rating), comment);
-    setStatus(result ?? "Feedback saved successfully.");
+    setStatus("");
+    setSaving(true);
+
+    const result = await addFeedback(
+      eventId,
+      Number(rating),
+      comment,
+    );
+
+    setSaving(false);
+
+    setStatus(
+      result ?? "Feedback saved successfully.",
+    );
   }
 
   return (
@@ -50,8 +65,13 @@ function FeedbackForm({ eventId, existing }) {
       </label>
 
       <div className="row">
-        <button className="btn">Save feedback</button>
-        {status && <span role="status">{status}</span>}
+        <button className="btn" disabled={saving}>
+          {saving ? "Saving..." : "Save feedback"}
+        </button>
+
+        {status && (
+          <span role="status">{status}</span>
+        )}
       </div>
     </form>
   );
@@ -60,8 +80,11 @@ function FeedbackForm({ eventId, existing }) {
 export default function EventDetails() {
   const { id } = useParams();
   const app = useApp();
+
   const event = app.events.find((item) => item.id === id);
+
   const [message, setMessage] = useState("");
+  const [processing, setProcessing] = useState(false);
 
   if (!event) {
     return (
@@ -78,27 +101,43 @@ export default function EventDetails() {
   }
 
   const registration = app.registrations.find(
-    (item) => item.eventId === id && item.userId === app.user?.id,
+    (item) =>
+      item.eventId === id &&
+      item.userId === app.user?.id,
   );
 
   const past = app.isPast(event);
   const left = app.seatsLeft(event);
-  const reviews = app.feedback.filter((item) => item.eventId === id);
+
+  const reviews = app.feedback.filter(
+    (item) => item.eventId === id,
+  );
 
   const averageRating = reviews.length
     ? (
-        reviews.reduce((total, item) => total + Number(item.rating), 0) /
-        reviews.length
+        reviews.reduce(
+          (total, item) => total + Number(item.rating),
+          0,
+        ) / reviews.length
       ).toFixed(1)
     : null;
 
-  const eventStatus = past ? "Ended" : left <= 0 ? "Fully booked" : "Upcoming";
+  const eventStatus = past
+    ? "Ended"
+    : left <= 0
+      ? "Fully booked"
+      : "Upcoming";
 
-  function handleRegistration(action) {
+  async function handleRegistration(action) {
+    setMessage("");
+    setProcessing(true);
+
     const result =
       action === "register"
-        ? app.registerForEvent(id)
-        : app.cancelRegistration(id);
+        ? await app.registerForEvent(id)
+        : await app.cancelRegistration(id);
+
+    setProcessing(false);
 
     setMessage(
       result ??
@@ -115,7 +154,12 @@ export default function EventDetails() {
       <article className="panel stack">
         <div className="row">
           <span className="badge">{event.category}</span>
-          <span className={`badge ${past || left <= 0 ? "full" : ""}`}>
+
+          <span
+            className={`badge ${
+              past || left <= 0 ? "full" : ""
+            }`}
+          >
             {eventStatus}
           </span>
         </div>
@@ -135,9 +179,14 @@ export default function EventDetails() {
           <p className="muted">📅 Date: {event.date}</p>
           <p className="muted">📍 Venue: {event.venue}</p>
           <p className="muted">🏛️ Organized by: {event.club}</p>
-          <p className="muted">👥 Capacity: {event.capacity} attendees</p>
           <p className="muted">
-            🎟️ Availability: {past ? "Event ended" : `${left} seats remaining`}
+            👥 Capacity: {event.capacity} attendees
+          </p>
+          <p className="muted">
+            🎟️ Availability:{" "}
+            {past
+              ? "Event ended"
+              : `${left} seats remaining`}
           </p>
         </div>
 
@@ -170,23 +219,36 @@ export default function EventDetails() {
               (registration ? (
                 <button
                   className="btn btn-ghost"
-                  onClick={() => handleRegistration("cancel")}
+                  disabled={processing}
+                  onClick={() =>
+                    handleRegistration("cancel")
+                  }
                 >
-                  Cancel registration
+                  {processing
+                    ? "Processing..."
+                    : "Cancel registration"}
                 </button>
               ) : (
                 <button
                   className="btn"
-                  disabled={left <= 0}
-                  onClick={() => handleRegistration("register")}
+                  disabled={processing || left <= 0}
+                  onClick={() =>
+                    handleRegistration("register")
+                  }
                 >
-                  {left <= 0 ? "Registration full" : "Register now"}
+                  {processing
+                    ? "Processing..."
+                    : left <= 0
+                      ? "Registration full"
+                      : "Register now"}
                 </button>
               ))}
           </div>
         )}
 
-        {message && <p role="status">{message}</p>}
+        {message && (
+          <p role="status">{message}</p>
+        )}
       </article>
 
       <section className="panel stack">
@@ -202,24 +264,32 @@ export default function EventDetails() {
           </div>
         )}
 
-        {app.user?.role === "student" && past && registration?.attended && (
-          <FeedbackForm
-            key={`${id}-${app.user.id}`}
-            eventId={id}
-            existing={reviews.find((item) => item.userId === app.user.id)}
-          />
-        )}
+        {app.user?.role === "student" &&
+          past &&
+          registration?.attended && (
+            <FeedbackForm
+              key={`${id}-${app.user.id}`}
+              eventId={id}
+              existing={reviews.find(
+                (item) => item.userId === app.user.id,
+              )}
+            />
+          )}
 
         {reviews.length ? (
           <ul className="list">
             {reviews.map((item) => (
               <li key={item.id}>
                 <strong>
-                  {app.users.find((user) => user.id === item.userId)?.name ??
-                    "Student"}
+                  {item.userName || "Student"}
                 </strong>
                 {" · "}⭐ {item.rating}/5
-                {item.comment && <p className="description">{item.comment}</p>}
+
+                {item.comment && (
+                  <p className="description">
+                    {item.comment}
+                  </p>
+                )}
               </li>
             ))}
           </ul>

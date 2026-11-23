@@ -1,364 +1,406 @@
-﻿import { useState } from "react";
-import { seed } from "../data/mockData";
+
+import { useCallback, useEffect, useState } from "react";
+import api from "../api";
 import { AppContext } from "./useApp";
 
-function load() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("cc_db"));
+const today = new Date().toLocaleDateString("sv-SE");
 
-    if (
-      saved &&
-      ["users", "events", "registrations", "feedback"].every((key) =>
-        Array.isArray(saved[key]),
-      )
-    ) {
-      return saved;
-    }
-  } catch {
-    // Start with demo data if saved data cannot be read.
-  }
+const emptyDb = {
+  users: [],
+  events: [],
+  registrations: [],
+  feedback: [],
+};
 
-  return seed;
-}
+const getId = (item) =>
+  String(item?._id ?? item?.id ?? (typeof item === "string" || typeof item === "number" ? item : ""));
 
-const uid = () => crypto.randomUUID();
-const normalizeEmail = (email) => email.trim().toLowerCase();
+const normalizeUser = (user) => ({
+  id: getId(user),
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  club: user.club ?? "",
+  approved: user.approved,
+});
+
+const normalizeEvent = (event) => ({
+  id: getId(event),
+  title: event.title,
+  description: event.description,
+  category: event.category,
+  date: event.date,
+  venue: event.venue,
+  capacity: event.capacity,
+  registeredCount: event.registeredCount ?? 0,
+  poster: event.poster
+    ? event.poster.startsWith("http")
+      ? event.poster
+      : `http://localhost:5000${event.poster}`
+    : "",
+  organizerId: getId(event.organizer),
+  organizerName:
+    typeof event.organizer === "object"
+      ? event.organizer?.name ?? ""
+      : "",
+  club: event.club,
+});
+
+const normalizeRegistration = (registration) => ({
+  id: getId(registration),
+  eventId: getId(registration.event),
+  userId: getId(registration.student),
+  userName:
+    typeof registration.student === "object"
+      ? registration.student?.name ?? ""
+      : "",
+  userEmail:
+    typeof registration.student === "object"
+      ? registration.student?.email ?? ""
+      : "",
+  attended: registration.attended,
+});
+
+const normalizeFeedback = (feedback) => ({
+  id: getId(feedback),
+  eventId: getId(feedback.event),
+  userId: getId(feedback.student),
+  userName:
+    typeof feedback.student === "object"
+      ? feedback.student?.name ?? ""
+      : "",
+  rating: feedback.rating,
+  comment: feedback.comment,
+});
 
 export function AppProvider({ children }) {
-  const [db, setDb] = useState(load);
-  const [userId, setUserId] = useState(() => localStorage.getItem("cc_user"));
-
-  const user =
-    db.users.find((item) => item.id === userId && item.approved) ?? null;
-
-  const [today] = useState(() => new Date().toLocaleDateString("sv-SE"));
+  const [db, setDb] = useState(emptyDb);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   const isPast = (event) => event.date < today;
 
-  const entries = (eventId) =>
-    db.registrations.filter((item) => item.eventId === eventId);
-
   const seatsLeft = (event) =>
-    Math.max(0, event.capacity - entries(event.id).length);
-
-  const findEvent = (id) => db.events.find((item) => item.id === id);
-
-  const owns = (event) =>
-    user?.role === "organizer" && event?.organizerId === user.id;
-
-  function save(next) {
-    try {
-      localStorage.setItem("cc_db", JSON.stringify(next));
-    } catch {
-      return "Browser storage could not save the changes. If you added a poster, try a smaller image.";
-    }
-
-    setDb(next);
-    return null;
-  }
-
-  const update = (key, items) => save({ ...db, [key]: items });
-
-  function setSession(id) {
-    if (id) localStorage.setItem("cc_user", id);
-    else localStorage.removeItem("cc_user");
-
-    setUserId(id);
-  }
-
-  function login(email, password) {
-    const account = db.users.find(
-      (item) =>
-        normalizeEmail(item.email) === normalizeEmail(email) &&
-        item.password === password,
+    Math.max(
+      0,
+      Number(event.capacity) - Number(event.registeredCount ?? 0),
     );
 
-    if (!account) return { error: "Wrong email or password." };
+  const refreshData = useCallback(async (activeUser) => {
+  const eventsResponse = await api.get("/events");
+  const events = eventsResponse.data.map(normalizeEvent);
 
-    if (!account.approved) {
+  let users = [];
+  let registrations = [];
+
+  if (activeUser?.role === "student") {
+    const response = await api.get("/registrations/mine");
+    registrations = response.data.map(normalizeRegistration);
+  }
+
+  if (activeUser?.role === "organizer") {
+    const response = await api.get("/registrations/organizer");
+    registrations = response.data.map(normalizeRegistration);
+  }
+
+  if (activeUser?.role === "admin") {
+    const [usersResponse, registrationsResponse] = await Promise.all([
+      api.get("/admin/users"),
+      api.get("/admin/registrations"),
+    ]);
+
+    users = usersResponse.data.map(normalizeUser);
+    registrations = registrationsResponse.data.map(normalizeRegistration);
+  }
+
+  const feedbackResponses = await Promise.all(
+    events.map((event) =>
+      api.get(`/feedback/event/${event.id}`).catch(() => ({
+        data: [],
+      })),
+    ),
+  );
+
+  const feedback = feedbackResponses.flatMap((response) =>
+    response.data.map(normalizeFeedback),
+  );
+
+  setDb({
+    users,
+    events,
+    registrations,
+    feedback,
+  });
+}, []);
+
+useEffect(() => {
+  async function restoreSession() {
+    const token = localStorage.getItem("cc_token");
+
+    if (!token) {
+      try {
+        await refreshData(null);
+      } catch (error) {
+        console.error("Could not load public events:", error);
+      } finally {
+        setAuthLoading(false);
+      }
+      return;
+    }
+
+    try {
+      const response = await api.get("/auth/me");
+      const activeUser = normalizeUser(response.data.user);
+
+      setUser(activeUser);
+      await refreshData(activeUser);
+    } catch {
+      localStorage.removeItem("cc_token");
+      localStorage.removeItem("cc_user");
+      setUser(null);
+
+      try {
+        await refreshData(null);
+      } catch (error) {
+        console.error("Could not load public events:", error);
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  restoreSession();
+}, [refreshData]);
+  async function login(email, password) {
+    try {
+      const response = await api.post("/auth/login", {
+        email,
+        password,
+      });
+
+      localStorage.setItem("cc_token", response.data.token);
+
+      const activeUser = normalizeUser(response.data.user);
+
+      localStorage.setItem("cc_user", activeUser.id);
+      setUser(activeUser);
+
+      await refreshData(activeUser);
+
+      return { user: activeUser };
+    } catch (error) {
       return {
-        error: "Your organizer account is waiting for admin approval.",
+        error:
+          error.response?.data?.message ??
+          "Could not log in. Please try again.",
       };
     }
-
-    setSession(account.id);
-    return { user: account };
   }
 
-  function signup({ name, email, password, role, club }) {
-    if (
-      !["student", "organizer"].includes(role) ||
-      !name.trim() ||
-      (role === "organizer" && !club.trim())
-    ) {
-      return "Enter a name and, for organizers, a club or department.";
+  async function signup({ name, email, password, role, club }) {
+    try {
+      await api.post("/auth/signup", {
+        name,
+        email,
+        password,
+        role,
+        club,
+      });
+
+      if (role === "organizer") {
+        return "Account created. Your account is waiting for admin approval.";
+      }
+
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not create your account. Please try again."
+      );
     }
-
-    if (
-      db.users.some(
-        (item) => normalizeEmail(item.email) === normalizeEmail(email),
-      )
-    ) {
-      return "An account with this email already exists.";
-    }
-
-    const account = {
-      id: uid(),
-      name: name.trim(),
-      email: normalizeEmail(email),
-      password,
-      role,
-      club: role === "organizer" ? club.trim() : "",
-      approved: role === "student",
-    };
-
-    const error = update("users", [...db.users, account]);
-
-    if (!error && account.approved) {
-      setSession(account.id);
-    }
-
-    return error;
   }
 
-  // Student event registration
-  function registerForEvent(eventId) {
-    const event = findEvent(eventId);
+  function logout() {
+    localStorage.removeItem("cc_token");
+    localStorage.removeItem("cc_user");
+    setUser(null);
+    setDb((currentDb) => ({
+      ...currentDb,
+      users: [],
+      registrations: [],
+    }));
 
+    refreshData(null).catch((error) => {
+      console.error("Could not refresh public events:", error);
+    });
+  }
+
+  async function registerForEvent(eventId) {
     if (user?.role !== "student") {
       return "Log in as a student to register.";
     }
 
-    if (!event) {
-      return "This event is no longer available.";
+    try {
+      await api.post(`/registrations/${eventId}`);
+      await refreshData(user);
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not register for this event."
+      );
     }
-
-    if (isPast(event)) {
-      return "Registration has ended.";
-    }
-
-    if (
-      !Number.isFinite(Number(event.capacity)) ||
-      Number(event.capacity) <= 0
-    ) {
-      return "Registration is unavailable for this event.";
-    }
-
-    if (entries(eventId).some((item) => item.userId === user.id)) {
-      return "You are already registered.";
-    }
-
-    if (entries(eventId).length >= Number(event.capacity)) {
-      return "This event is full.";
-    }
-
-    return update("registrations", [
-      ...db.registrations,
-      {
-        id: uid(),
-        eventId,
-        userId: user.id,
-        attended: false,
-      },
-    ]);
   }
 
-  // Student registration cancellation
-  function cancelRegistration(eventId) {
-    const event = findEvent(eventId);
-
-    if (user?.role !== "student") {
-      return "Log in as a student to cancel registration.";
+  async function cancelRegistration(eventId) {
+    try {
+      await api.delete(`/registrations/${eventId}`);
+      await refreshData(user);
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not cancel this registration."
+      );
     }
-
-    if (!event || isPast(event)) {
-      return "This registration can no longer be cancelled.";
-    }
-
-    const registration = entries(eventId).find(
-      (item) => item.userId === user.id,
-    );
-
-    if (!registration) {
-      return "You are not registered for this event.";
-    }
-
-    if (registration.attended) {
-      return "An attended registration cannot be cancelled.";
-    }
-
-    return update(
-      "registrations",
-      db.registrations.filter(
-        (item) => !(item.eventId === eventId && item.userId === user.id),
-      ),
-    );
   }
 
-  // Organizer attendance management
-  function markAttendance(regId, attended) {
-    const registration = db.registrations.find((item) => item.id === regId);
+  async function markAttendance(regId, attended) {
+    try {
+      await api.patch(`/registrations/${regId}/attendance`, {
+        attended,
+      });
 
-    if (!registration) {
-      return "Registration not found.";
+      await refreshData(user);
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not update attendance."
+      );
     }
-
-    const event = findEvent(registration.eventId);
-
-    if (!event || !owns(event)) {
-      return "You do not have access to this attendance record.";
-    }
-
-    if (event.date > today) {
-      return "Attendance can only be marked on or after the event date.";
-    }
-
-    if (typeof attended !== "boolean") {
-      return "Invalid attendance status.";
-    }
-
-    return update(
-      "registrations",
-      db.registrations.map((item) =>
-        item.id === regId ? { ...item, attended } : item,
-      ),
-    );
   }
 
-  // Student feedback
-  function addFeedback(eventId, rating, comment) {
-    const event = findEvent(eventId);
-
-    if (
-      user?.role !== "student" ||
-      !event ||
-      !isPast(event) ||
-      !entries(eventId).some((item) => item.userId === user.id && item.attended)
-    ) {
-      return "Feedback is available after you attend an event.";
-    }
-
-    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-      return "Choose a rating from 1 to 5.";
-    }
-
-    const previous = db.feedback.find(
-      (item) => item.eventId === eventId && item.userId === user.id,
-    );
-
-    return update("feedback", [
-      ...db.feedback.filter((item) => item.id !== previous?.id),
-      {
-        id: previous?.id ?? uid(),
-        eventId,
-        userId: user.id,
+  async function addFeedback(eventId, rating, comment) {
+    try {
+      await api.post(`/feedback/event/${eventId}`, {
         rating,
-        comment: comment.trim(),
-      },
-    ]);
+        comment,
+      });
+
+      await refreshData(user);
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not save feedback."
+      );
+    }
   }
 
-  // Organizer event creation
-  function createEvent(data) {
+  async function createEvent(data) {
     if (user?.role !== "organizer") {
       return "Only organizers can publish events.";
     }
 
-    return update("events", [
-      ...db.events,
-      {
-        ...data,
-        id: uid(),
-        organizerId: user.id,
-        club: user.club,
-      },
-    ]);
+    try {
+      const formData = new FormData();
+
+      Object.entries(data).forEach(([key, value]) => {
+        if (key === "poster") {
+          if (value instanceof File) {
+            formData.append("poster", value);
+          }
+        } else {
+          formData.append(key, value);
+        }
+      });
+
+      await api.post("/events", formData);
+      await refreshData(user);
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not create the event."
+      );
+    }
   }
 
-  // Organizer event editing
-  function updateEvent(id, data) {
-    if (!owns(findEvent(id))) {
-      return "You can only edit your club’s events.";
-    }
+  async function updateEvent(id, data) {
+    try {
+      const formData = new FormData();
 
-    if (data.capacity < entries(id).length) {
-      return "Capacity cannot be less than the number registered.";
-    }
+      Object.entries(data).forEach(([key, value]) => {
+        if (key === "poster") {
+          if (value instanceof File) {
+            formData.append("poster", value);
+          }
+        } else {
+          formData.append(key, value);
+        }
+      });
 
-    return update(
-      "events",
-      db.events.map((event) =>
-        event.id === id ? { ...event, ...data } : event,
-      ),
-    );
+      await api.put(`/events/${id}`, formData);
+      await refreshData(user);
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not update the event."
+      );
+    }
   }
 
-  // Event deletion
-  function deleteEvent(id) {
-    if (user?.role !== "admin" && !owns(findEvent(id))) {
-      return "You do not have access to remove this event.";
+  async function deleteEvent(id) {
+    try {
+      await api.delete(`/events/${id}`);
+      await refreshData(user);
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not delete the event."
+      );
     }
-
-    return save({
-      ...db,
-      events: db.events.filter((event) => event.id !== id),
-      registrations: db.registrations.filter((item) => item.eventId !== id),
-      feedback: db.feedback.filter((item) => item.eventId !== id),
-    });
   }
 
-  // Admin organizer approval
-  function approveOrganizer(id) {
-    if (user?.role !== "admin") {
-      return "Only admins can approve organizers.";
+  async function approveOrganizer(id) {
+    try {
+      await api.patch(`/admin/users/${id}/approve`);
+      await refreshData(user);
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not approve this organizer."
+      );
     }
-
-    return update(
-      "users",
-      db.users.map((item) =>
-        item.id === id && item.role === "organizer"
-          ? { ...item, approved: true }
-          : item,
-      ),
-    );
   }
 
-  // Admin user removal
-  function removeUser(id) {
-    if (
-      user?.role !== "admin" ||
-      db.users.find((item) => item.id === id)?.role === "admin"
-    ) {
-      return "This account cannot be removed.";
+  async function removeUser(id) {
+    try {
+      await api.delete(`/admin/users/${id}`);
+      await refreshData(user);
+      return null;
+    } catch (error) {
+      return (
+        error.response?.data?.message ??
+        "Could not remove this user."
+      );
     }
-
-    const removed = new Set(
-      db.events
-        .filter((event) => event.organizerId === id)
-        .map((event) => event.id),
-    );
-
-    return save({
-      users: db.users.filter((item) => item.id !== id),
-      events: db.events.filter((event) => !removed.has(event.id)),
-      registrations: db.registrations.filter(
-        (item) => item.userId !== id && !removed.has(item.eventId),
-      ),
-      feedback: db.feedback.filter(
-        (item) => item.userId !== id && !removed.has(item.eventId),
-      ),
-    });
   }
 
-  const value = {
+ const value = {
     ...db,
     user,
+    authLoading,
     today,
     isPast,
     seatsLeft,
     login,
     signup,
-    logout: () => setSession(null),
+    logout,
     registerForEvent,
     cancelRegistration,
     markAttendance,
@@ -368,7 +410,12 @@ export function AppProvider({ children }) {
     deleteEvent,
     approveOrganizer,
     removeUser,
+    refreshData: () => refreshData(user),
   };
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={value}>
+      {children}
+    </AppContext.Provider>
+  );
 }

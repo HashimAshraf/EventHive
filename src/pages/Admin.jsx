@@ -1,4 +1,5 @@
-﻿import { useMemo, useState } from "react";
+﻿
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useApp } from "../context/useApp";
 
@@ -12,8 +13,8 @@ export default function Admin() {
     deleteEvent,
   } = useApp();
 
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [eventSearch, setEventSearch] = useState("");
 
@@ -21,7 +22,9 @@ export default function Admin() {
     (user) => user.role === "organizer" && !user.approved,
   );
 
-  const students = users.filter((user) => user.role === "student").length;
+  const students = users.filter(
+    (user) => user.role === "student",
+  ).length;
 
   const organizers = users.filter(
     (user) => user.role === "organizer" && user.approved,
@@ -47,46 +50,57 @@ export default function Admin() {
     );
   }, [events, eventSearch]);
 
-  function handleApprove(user) {
-    const result = approveOrganizer(user.id);
+  async function handleApprove(user) {
+    setError("");
+    setSuccess("");
+
+    const result = await approveOrganizer(user.id);
 
     if (result) {
       setError(result);
-      setSuccess(null);
     } else {
-      setError(null);
       setSuccess(`${user.name} has been approved as an organizer.`);
     }
   }
 
-  function handleRemoveUser(user) {
-    if (!window.confirm(`Remove ${user.name} and their associated records?`)) {
+  async function handleRemoveUser(user) {
+    if (
+      !window.confirm(
+        `Remove ${user.name} and their associated records?`,
+      )
+    ) {
       return;
     }
 
-    const result = removeUser(user.id);
+    setError("");
+    setSuccess("");
+
+    const result = await removeUser(user.id);
 
     if (result) {
       setError(result);
-      setSuccess(null);
     } else {
-      setError(null);
       setSuccess(`${user.name} has been removed.`);
     }
   }
 
-  function handleDeleteEvent(event) {
-    if (!window.confirm(`Remove "${event.title}" and its registrations?`)) {
+  async function handleDeleteEvent(event) {
+    if (
+      !window.confirm(
+        `Remove "${event.title}" and its registrations?`,
+      )
+    ) {
       return;
     }
 
-    const result = deleteEvent(event.id);
+    setError("");
+    setSuccess("");
+
+    const result = await deleteEvent(event.id);
 
     if (result) {
       setError(result);
-      setSuccess(null);
     } else {
-      setError(null);
       setSuccess(`${event.title} has been removed.`);
     }
   }
@@ -95,7 +109,9 @@ export default function Admin() {
     <div className="stack">
       <header className="hero">
         <h1>Admin panel</h1>
-        <p>Review organizer requests and manage campus content.</p>
+        <p>
+          Review organizer requests and manage campus content.
+        </p>
       </header>
 
       {error && (
@@ -145,7 +161,9 @@ export default function Admin() {
       <section className="stack">
         <h2>
           Organizer approvals{" "}
-          <span className="badge">{pending.length} pending</span>
+          <span className="badge">
+            {pending.length} pending
+          </span>
         </h2>
 
         {pending.length ? (
@@ -156,7 +174,9 @@ export default function Admin() {
                 <p className="muted">
                   {user.club} · {user.email}
                 </p>
-                <span className="badge">Awaiting approval</span>
+                <span className="badge">
+                  Awaiting approval
+                </span>
               </div>
 
               <button
@@ -177,7 +197,9 @@ export default function Admin() {
       <section className="stack">
         <div className="split">
           <h2>Manage users</h2>
-          <span className="muted">{filteredUsers.length} users</span>
+          <span className="muted">
+            {filteredUsers.length} users
+          </span>
         </div>
 
         <input
@@ -230,14 +252,18 @@ export default function Admin() {
             </table>
           </div>
         ) : (
-          <p className="panel muted">No users match your search.</p>
+          <p className="panel muted">
+            No users match your search.
+          </p>
         )}
       </section>
 
       <section className="stack">
         <div className="split">
           <h2>Manage events</h2>
-          <span className="muted">{filteredEvents.length} events</span>
+          <span className="muted">
+            {filteredEvents.length} events
+          </span>
         </div>
 
         <input
@@ -253,7 +279,9 @@ export default function Admin() {
             <article className="panel split" key={event.id}>
               <div>
                 <strong>
-                  <Link to={`/events/${event.id}`}>{event.title}</Link>
+                  <Link to={`/events/${event.id}`}>
+                    {event.title}
+                  </Link>
                 </strong>
 
                 <p className="muted">
@@ -262,8 +290,9 @@ export default function Admin() {
 
                 <p className="muted">
                   {
-                    registrations.filter((item) => item.eventId === event.id)
-                      .length
+                    registrations.filter(
+                      (item) => item.eventId === event.id,
+                    ).length
                   }{" "}
                   registrations
                 </p>
@@ -279,7 +308,9 @@ export default function Admin() {
             </article>
           ))
         ) : (
-          <p className="panel muted">No events match your search.</p>
+          <p className="panel muted">
+            No events match your search.
+          </p>
         )}
       </section>
     </div>
